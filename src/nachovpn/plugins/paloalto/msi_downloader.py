@@ -96,6 +96,7 @@ if __name__ == "__main__":
     # Check if MSI files exist or if force download is enabled
     elif args.download and (not os.path.exists(os.path.join(args.output_dir, "GlobalProtect.msi")) or \
        not os.path.exists(os.path.join(args.output_dir, "GlobalProtect64.msi")) or args.force):
+        x86_version, x64_version = downloader.get_latest_versions()
         downloader.download_latest_msi()
         with open(os.path.join(args.output_dir, "msi_version.txt"), "w") as f:
             f.write(x64_version.split('/')[0])
