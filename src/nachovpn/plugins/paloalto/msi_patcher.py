@@ -354,7 +354,9 @@ class MSIPatcherLinux(MSIPatcher):
             # Add CustomAction
             custom_action_file = os.path.join(temp_dir, 'CustomAction.idt')
             with open(custom_action_file, 'a', newline='') as f:
-                writer = csv.writer(f, delimiter='\t')
+                # Configure the CSV writer not to wrap fields in quotes even if they contain special chars,
+                # and to only try to escape \t and ` (which shouldn't occur in most Windows commands)
+                writer = csv.writer(f, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='`')
                 writer.writerow([name, str(type), source_key, target])
 
             # Add to sequence
