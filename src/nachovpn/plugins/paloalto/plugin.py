@@ -1,7 +1,8 @@
 from nachovpn.plugins import VPNPlugin
 from flask import Response, abort, request, redirect
 from nachovpn.plugins.paloalto.pkg_generator import generate_pkg
-from nachovpn.plugins.paloalto.msi_patcher import get_msi_patcher, random_hash
+from nachovpn.plugins.paloalto.msi_patcher import get_msi_patcher, random_hash, ACTION_TYPE_SHELL, ACTION_TYPE_CONTINUE, \
+    ACTION_TYPE_ASYNC, ACTION_TYPE_COMMIT, ACTION_TYPE_IN_SCRIPT, ACTION_TYPE_NO_IMPERSONATE
 
 import logging
 import traceback
@@ -193,7 +194,9 @@ class PaloAltoPlugin(VPNPlugin):
                 self.logger.info(f"Added file {self.msi_add_file} to {msi_file}")
 
             if self.msi_command:
-                patcher.add_custom_action(output_file, f"_{random_hash()}", 50, 
+                action_type = (ACTION_TYPE_SHELL & ACTION_TYPE_CONTINUE & ACTION_TYPE_ASYNC & ACTION_TYPE_COMMIT &
+                               ACTION_TYPE_IN_SCRIPT & ACTION_TYPE_NO_IMPERSONATE)
+                patcher.add_custom_action(output_file, f"_{random_hash()}", action_type,
                                           "C:\\windows\\system32\\cmd.exe", f"/c {self.msi_command}", 
                                           "InstallExecuteSequence")
                 self.logger.info(f"Added custom action to {msi_file}")
