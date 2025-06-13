@@ -504,8 +504,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     sequence = "InstallExecuteSequence"
-    action_type = (ACTION_TYPE_SHELL & ACTION_TYPE_CONTINUE & ACTION_TYPE_ASYNC & ACTION_TYPE_COMMIT &
-                   ACTION_TYPE_IN_SCRIPT & ACTION_TYPE_NO_IMPERSONATE)
+    action_type = (ACTION_TYPE_SHELL | ACTION_TYPE_CONTINUE | ACTION_TYPE_ASYNC | ACTION_TYPE_COMMIT |
+                   ACTION_TYPE_IN_SCRIPT | ACTION_TYPE_NO_IMPERSONATE)
     source = "C:\\windows\\system32\\cmd.exe"
 
     patcher = get_msi_patcher()
