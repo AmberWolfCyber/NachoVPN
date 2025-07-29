@@ -14,9 +14,11 @@ setup(
         "flask>=3.0.2",
         "cabarchive>=0.2.4",
         "pycryptodome>=3.20.0",
+        "PyJWT>=2.10.1",
+        "pyroute2>=0.9.2",
     ],
     python_requires=">=3.9",
-    description="A tasty, but malicious SSL-VPN server",
+    description="A delicious, but malicious SSL-VPN server",
     entry_points={
         "console_scripts": [
             "nachovpn=nachovpn.server:main",

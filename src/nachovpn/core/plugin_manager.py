@@ -1,13 +1,12 @@
-from nachovpn.plugins import VPNPlugin
-from nachovpn.core.request_handler import VPNStreamRequestHandler
-
 import logging
 import traceback
 import os
+import asyncio
 
 class PluginManager:
-    def __init__(self):
+    def __init__(self, loop=None):
         self.plugins = []
+        self.loop = loop or asyncio.get_event_loop()
 
     def register_plugin(self, plugin_class, **kwargs):
         """Register a plugin"""
@@ -40,4 +39,3 @@ class PluginManager:
                 logging.error(f"Error in plugin {plugin.__class__.__name__}: {e}")
                 logging.error(traceback.format_exc())
         return False
-
