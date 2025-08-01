@@ -1,24 +1,18 @@
-from http.server import BaseHTTPRequestHandler
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from jinja2 import Environment, FileSystemLoader
-from nachovpn.core.utils import PacketHandler
-from io import BytesIO
-
 import logging
 import os
 
 class VPNPlugin:
-    def __init__(self, cert_manager=None, write_pcap=False, external_ip=None, dns_name=None, db_manager=None, template_dir=None):
+    def __init__(self, cert_manager=None, external_ip=None, dns_name=None, db_manager=None, template_dir=None, packet_handler=None, **kwargs):
         self.enabled = True
         self.cert_manager = cert_manager
-        self.write_pcap = write_pcap
         self.external_ip = external_ip
         self.dns_name = dns_name
         self.db_manager = db_manager
         self.template_dir = template_dir
+        self.packet_handler = packet_handler
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.pcap_filename = os.path.join("pcaps", f"{self.__class__.__name__.lower().rstrip('plugin')}.pcap")
-        self.packet_handler = PacketHandler(write_pcap=self.write_pcap, pcap_filename=self.pcap_filename, logger_name=self.__class__.__name__)
 
         # setup Flask app
         self.flask_app = Flask(__name__)
@@ -93,7 +87,6 @@ class VPNPlugin:
         return False
 
     def handle_data(self, data, client_socket, client_ip):
-        """Handle raw VPN data"""
         return False
 
     def handle_http(self, handler):
@@ -112,3 +105,7 @@ class VPNPlugin:
                 plugin_name=self.__class__.__name__,
                 other_data=other_data
             )
+
+    def _wrap_packet(self, packet_data, client):
+        """Wrap the packet data with the plugin's specific protocol."""
+        return packet_data

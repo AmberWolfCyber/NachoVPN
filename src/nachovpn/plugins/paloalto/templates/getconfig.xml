@@ -17,9 +17,9 @@
   <bw-c2s>1000</bw-c2s>
   <bw-s2c>1000</bw-s2c>
   <panos-version>11.1.0</panos-version>
-  <gw-address>8.8.8.8</gw-address>
+  <gw-address>{{ gateway_ip }}</gw-address>
   <ipv6-connection>no</ipv6-connection>
-  <ip-address>192.168.99.122</ip-address>
+  <ip-address>{{ client_ip }}</ip-address>
   <netmask>255.255.255.255</netmask>
   <ip-address-preferred>yes</ip-address-preferred>
   <dns>
@@ -29,14 +29,14 @@
 		</wins>
   <dns-suffix>
 		</dns-suffix>
-  <default-gateway>192.168.99.1</default-gateway>
+  <default-gateway>10.10.10.1</default-gateway>
   <mtu>0</mtu>
   <no-direct-access-to-local-network>no</no-direct-access-to-local-network>
   <access-routes>
     <member>0.0.0.0/0</member>
+    <member>1.1.1.1/32</member>
   </access-routes>
   <exclude-access-routes>
     <member>{{ gateway_ip }}/32</member>
-    <member>1.1.1.1/32</member>
   </exclude-access-routes>
 </response>

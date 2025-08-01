@@ -648,12 +648,12 @@ class PacketHandler:
         """Handle a packet from a client"""
         try:
             self.logger.debug(f"Handling client packet for connection_id {connection_id}")
-            
+
             ip_address = self.conn_to_ip.get(connection_id)
             if not ip_address:
                 self.logger.error(f"No client found for connection_id {connection_id}")
                 return
-            
+
             client_info = self.clients.get(ip_address)
             if not client_info:
                 self.logger.error(f"No ClientInfo found for IP {ip_address}")
