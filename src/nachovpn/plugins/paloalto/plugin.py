@@ -71,8 +71,7 @@ class PaloAltoPlugin(VPNPlugin):
         while True:
             suffix = os.urandom(8).hex()
             if suffix not in self.allocated_suffixes:
-                # tuple of (downgraded, backdoored)
-                self.allocated_suffixes[suffix] = (False, False)
+                self.allocated_suffixes[suffix] = False
                 self.logger.info(f"Generated unique suffix: {suffix}")
                 return suffix
 
