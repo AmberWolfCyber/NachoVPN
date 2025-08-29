@@ -147,8 +147,9 @@ NachoVPN supports the following plugins and capabilities:
 | -------- | ----------- | -------- | -------- | -------- | -------- | -------- | -------- | ---- |
 | Cisco | Cisco AnyConnect | N/A | ✅ | ✅ | ❌ | ❌ | ✅ | [Windows](https://vimeo.com/1024773762) / [macOS](https://vimeo.com/1024773668) |
 | SonicWall | SonicWall NetExtender | [CVE-2024-29014](https://blog.amberwolf.com/blog/2024/november/sonicwall-netextender-for-windows---rce-as-system-via-epc-client-update-cve-2024-29014/) | ✅ | ❌ | ✅ | ✅ | ❌ | [Windows](https://vimeo.com/1024774407) |
-| PaloAlto | Palo Alto GlobalProtect | [CVE-2024-5921](https://blog.amberwolf.com/blog/2024/november/palo-alto-globalprotect---code-execution-and-privilege-escalation-via-malicious-vpn-server-cve-2024-5921/) (partial fix) | ✅ | ✅ | ✅ | ❌ | ✅ | [Windows](https://vimeo.com/1024774239) / [macOS](https://vimeo.com/1024773987) / [iOS](https://vimeo.com/1024773956) |
-| PulseSecure | Ivanti Connect Secure | CVE-2020-8241 (bypassed) | ✅ | ✅ | ✅ | ✅ (Windows only) | ✅ | [Windows](https://vimeo.com/1024773914) |
+| PaloAlto | Palo Alto GlobalProtect | [CVE-2024-5921](https://blog.amberwolf.com/blog/2024/november/palo-alto-globalprotect---code-execution-and-privilege-escalation-via-malicious-vpn-server-cve-2024-5921/) [(partial fix)](https://blog.amberwolf.com/blog/2025/august/nachovpn-update---palo-alto-globalprotect/) | ✅ | ✅ | ✅ | ❌ | ✅ | [Windows](https://vimeo.com/1024774239) / [macOS](https://vimeo.com/1024773987) / [iOS](https://vimeo.com/1024773956) |
+| PulseSecure | Ivanti Connect Secure | [CVE-2020-8241 (bypassed)](https://blog.amberwolf.com/blog/2025/july/nachovpn-update---ivanti-connect-secure/) | ✅ | ✅ | ✅ | ✅ (Windows only - disabled by default in [22.8R1](https://help.ivanti.com/ps/help/en_US/ISAC/22.X/rn-22.X/noteworthy-information.htm)) | ✅ | [Windows](https://vimeo.com/1024773914) |
+| Netskope | Netskope | [CVE-2025-0309](https://blog.amberwolf.com/blog/2025/august/advisory---netskope-client-for-windows---local-privilege-escalation-via-rogue-server/) | ✅ | ❌ | ✅ | ❌ | ❌ | [Windows](https://vimeo.com/1114191607) |
 
 #### URI handlers
 

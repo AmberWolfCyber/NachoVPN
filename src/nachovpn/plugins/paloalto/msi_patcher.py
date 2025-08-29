@@ -4,7 +4,6 @@ import logging
 import argparse
 import shutil
 import os
-import sys
 import uuid
 import warnings
 import subprocess
@@ -63,28 +62,16 @@ class MSIPatcherWindows(MSIPatcher):
         db.Close()
         return version
 
-    def increment_msi_version(self, msi_path):
+    def set_msi_version(self, msi_path, new_version, change_product_code=True):
         db = msilib.OpenDatabase(msi_path, msilib.MSIDBOPEN_DIRECT)
         view = db.OpenView("SELECT `Value` FROM `Property` WHERE `Property` = 'ProductVersion'")
-        view.Execute(None)   
+        view.Execute(None)
         record = view.Fetch()
 
         current_version = None
-        new_version = None
 
         if record:
             current_version = record.GetString(1)
-            version = current_version.split('-')[0]
-            major, minor, patch = map(int, version.split('.'))
-            patch += 1
-            if patch == 100:
-                minor += 1
-                patch = 0
-            if minor == 100:
-                major += 1
-                minor = 0
-            new_version = f"{major}.{minor}.{patch}"
-
             update_view = db.OpenView("UPDATE `Property` SET `Value` = ? WHERE `Property` = 'ProductVersion'")
             update_record = msilib.CreateRecord(1)
             update_record.SetString(1, new_version)
@@ -92,14 +79,15 @@ class MSIPatcherWindows(MSIPatcher):
             update_view.Close()
             db.Commit()
 
-            new_product_code = '{' + str(uuid.uuid4()).upper() + '}'
-            product_code_view = db.OpenView("UPDATE `Property` SET `Value` = ? WHERE `Property` = 'ProductCode'")
-            product_code_record = msilib.CreateRecord(1)
-            product_code_record.SetString(1, new_product_code)
-            product_code_view.Execute(product_code_record)
-            product_code_view.Close()
-            db.Commit()
-            logging.info(f"New ProductCode: {new_product_code}")
+            if change_product_code:
+                new_product_code = '{' + str(uuid.uuid4()).upper() + '}'
+                product_code_view = db.OpenView("UPDATE `Property` SET `Value` = ? WHERE `Property` = 'ProductCode'")
+                product_code_record = msilib.CreateRecord(1)
+                product_code_record.SetString(1, new_product_code)
+                product_code_view.Execute(product_code_record)
+                product_code_view.Close()
+                db.Commit()
+                logging.info(f"New ProductCode: {new_product_code}")
 
             if current_version and new_version:
                 logging.info(f"MSI version updated from {current_version} to {new_version}")
@@ -108,6 +96,15 @@ class MSIPatcherWindows(MSIPatcher):
 
         view.Close()
         db.Close()
+
+    def increment_msi_version(self, msi_path, change_product_code=True):
+        current_version = self.get_msi_version(msi_path)
+        if not current_version:
+            logging.error("ProductVersion property not found in MSI")
+            return False
+
+        new_version = self.get_higher_version(current_version)
+        self.set_msi_version(msi_path, new_version, change_product_code)
 
     def add_custom_action(self, msi_path, name, type, source, target, sequence):
         db = msilib.OpenDatabase(msi_path, msilib.MSIDBOPEN_DIRECT)
@@ -298,14 +295,22 @@ class MSIPatcherLinux(MSIPatcher):
                         return row[1]
         return None
 
-    def increment_msi_version(self, msi_path):
+    def increment_msi_version(self, msi_path, change_product_code=True):
+        current_version = self.get_msi_version(msi_path)
+        if not current_version:
+            logging.error("ProductVersion property not found in MSI")
+            return False
+
+        new_version = self.get_higher_version(current_version)
+        self.set_msi_version(msi_path, new_version, change_product_code)
+
+    def set_msi_version(self, msi_path, new_version, change_product_code=True):
         with tempfile.TemporaryDirectory() as temp_dir:
             subprocess.run(['msidump', '-d', temp_dir, msi_path], check=True)
 
             property_file = os.path.join(temp_dir, 'Property.idt')
             updated_property_rows = []
             current_version = None
-            new_version = None
             new_product_code = None
 
             with open(property_file, 'r') as f:
@@ -313,18 +318,8 @@ class MSIPatcherLinux(MSIPatcher):
                 for row in reader:
                     if row[0] == 'ProductVersion':
                         current_version = row[1]
-                        version = current_version.split('-')[0]
-                        major, minor, patch = map(int, version.split('.'))
-                        patch += 1
-                        if patch == 100:
-                            minor += 1
-                            patch = 0
-                        if minor == 100:
-                            major += 1
-                            minor = 0
-                        new_version = f"{major}.{minor}.{patch}"
                         row[1] = new_version
-                    elif row[0] == 'ProductCode':
+                    elif row[0] == 'ProductCode' and change_product_code:
                         new_product_code = '{' + str(uuid.uuid4()).upper() + '}'
                         row[1] = new_product_code
                     updated_property_rows.append(row)
@@ -339,6 +334,19 @@ class MSIPatcherLinux(MSIPatcher):
             logging.info(f"MSI version updated from {current_version} to {new_version}")
         if new_product_code:
             logging.info(f"New ProductCode: {new_product_code}")
+
+    def add_custom_property(self, msi_path, name, value):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            subprocess.run(['msidump', '-d', temp_dir, msi_path], check=True)
+
+            property_file = os.path.join(temp_dir, 'Property.idt')
+            with open(property_file, 'a', newline='') as f:
+                writer = csv.writer(f, delimiter='\t')
+                writer.writerow([name, value])
+
+            subprocess.run(['msibuild', msi_path, '-i', os.path.join(temp_dir, 'Property.idt')], check=True)
+
+        return True
 
     def add_custom_action(self, msi_path, name, type, source, target, sequence):
         with tempfile.TemporaryDirectory() as temp_dir:
