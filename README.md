@@ -23,12 +23,14 @@ For further details, see our [blog post](https://blog.amberwolf.com/blog/2024/no
 * Docker (optional)
 * osslsigncode (Linux only)
 * msitools (Linux only)
-* python-netfilter (Linux only)
+* python3-netfilter (Linux only)
 * git
 
 ### Linux Setup
 
-* Install `python3-netfilter` (on Ubuntu)
+NachoVPN is built and tested on Ubuntu 22.04.
+
+* Install `python3-nftables` and `nftables`
 * Optionally use `setcap` to avoid `sudo` requirement:
 
   ```bash

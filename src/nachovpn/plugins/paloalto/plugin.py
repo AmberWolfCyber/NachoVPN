@@ -51,10 +51,6 @@ class PaloAltoPlugin(VPNPlugin):
         self.codesign_key_path = os.path.join('certs', 'paloalto-codesign.key')
         self.codesign_pfx_path = os.path.join('certs', 'paloalto-codesign.pfx')
 
-        # Get versions
-        self.latest_version = self.get_latest_msi_version()
-        self.upgrade_version = self.get_higher_version(self.latest_version)
-
         # Gateway config
         self.gateway_config = {
             "gateway_ip": self.external_ip,
@@ -225,6 +221,13 @@ class PaloAltoPlugin(VPNPlugin):
         return True
 
     def bootstrap(self):
+        # Get versions
+        self.latest_version = self.get_latest_msi_version()
+        if not self.latest_version:
+            return False
+
+        self.upgrade_version = self.get_higher_version(self.latest_version)
+
         # Generate an Apple code signing certificate
         if not os.path.exists(self.apple_cert_path) or not os.path.exists(self.apple_key_path):
             self.cert_manager.generate_apple_certificate(

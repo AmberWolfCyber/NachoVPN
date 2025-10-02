@@ -51,7 +51,7 @@ class VPNServer:
             'write_pcap': os.getenv("WRITE_PCAP", False),
             'cert_manager': self.cert_manager,
             'external_ip': os.getenv('EXTERNAL_IP', socket.gethostbyname(socket.gethostname())),
-            'dns_name': os.getenv('SERVER_FQDN', socket.gethostname()),
+            'dns_name': os.getenv('SERVER_FQDN') or os.getenv('WEBSITE_HOSTNAME', socket.gethostname()),
             'db_manager': self.db_manager,
         }
 
