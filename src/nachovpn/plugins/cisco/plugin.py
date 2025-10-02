@@ -3,8 +3,6 @@ from flask import Response, abort, request
 from jinja2 import Template
 
 import logging
-import datetime
-import socket
 import hashlib
 import re
 import os
@@ -24,13 +22,14 @@ class CTSP:
         COMPRESSED_DATA = 0x08
         TERMINATE = 0x09
 
-    def __init__(self, data, socket, packet_handler=None):
-        self.data = data
+    def __init__(self, socket, packet_handler=None, connection_id=None):
         self.socket = socket
         self.packet_handler = packet_handler
+        self.connection_id = connection_id
 
-    def create_packet(self, packet_type, data=b''):
-        resp = self.Constants.MAGIC_NUMBER.to_bytes(4, 'big')
+    @staticmethod
+    def create_packet(packet_type, data=b''):
+        resp = CTSP.Constants.MAGIC_NUMBER.to_bytes(4, 'big')
         resp += (len(data)).to_bytes(2, 'big')
         resp += packet_type.to_bytes(1, 'big')
         resp += b'\x00'
@@ -51,22 +50,29 @@ class CTSP:
         logging.info(f"Sending KEEPALIVE: {resp.hex()}")
         self.socket.sendall(resp)
 
-    def parse(self):
+    def parse(self, data):
         try:
-            if int.from_bytes(self.data[0:4], byteorder='big') != self.Constants.MAGIC_NUMBER:
+            if int.from_bytes(data[0:4], byteorder='big') != self.Constants.MAGIC_NUMBER:
                 raise Exception("Invalid packet")
 
-            packet_length = int.from_bytes(self.data[4:6], byteorder='big')
-            packet_type = self.data[6]
+            packet_length = int.from_bytes(data[4:6], byteorder='big')
+            packet_type = data[6]
 
-            if len(self.data) - self.Constants.HEADER_LENGTH != packet_length:
+            if len(data) - self.Constants.HEADER_LENGTH != packet_length:
                 raise Exception(f"Invalid packet length: {packet_length}")
 
-            packet_data = self.data[self.Constants.HEADER_LENGTH:]
+            packet_data = data[self.Constants.HEADER_LENGTH:]
 
             if packet_type == self.PacketType.DATA:
-                if packet_data[0] == 0x45 and self.packet_handler is not None:
-                    self.packet_handler.handle_client_packet(packet_data)
+                # Check if the packet is a valid IPv4 packet
+                if len(packet_data) >= 20 and (packet_data[0] >> 4) == 4 and self.packet_handler is not None:
+                    logging.debug(f"Received valid IPv4 packet")
+
+                    # Handle packet with the packet handler
+                    self.packet_handler.handle_client_packet(
+                        packet_data,
+                        self.connection_id
+                    )
 
             elif packet_type == self.PacketType.DISCONNECT:
                 logging.info(f"Received disconnect packet. Message: {packet_data[1:].decode()}")
@@ -212,14 +218,20 @@ class CiscoPlugin(VPNPlugin):
     def handle_connect(self, handler):
         self.logger.info(f"Handling CONNECT for {handler.path}")
         try:
+            # Create a new session and get the connection_id
+            connection_id, ip_address = self.packet_handler.create_session(handler.connection, self._wrap_packet)
+            session_id = hashlib.sha256(connection_id.encode()).hexdigest().upper()
+            hostname = f"{connection_id[:8]}.nachovpn.local"
+            self.logger.debug(f"Connection ID: {connection_id}, IP Address: {ip_address}, Session ID: {session_id}, Hostname: {hostname}")
+
             # Send headers
             headers = [
                 b"HTTP/1.1 200 OK",
                 b"X-CSTP-Version: 1",
                 b"X-CSTP-Protocol: Copyright (c) 2004 Cisco Systems, Inc.",
-                b"X-CSTP-Address: 192.168.59.128",
+                f"X-CSTP-Address: {ip_address}".encode(),
                 b"X-CSTP-Netmask: 255.255.255.0",
-                b"X-CSTP-Hostname: 192.168.49.159",
+                f"X-CSTP-Hostname: {hostname}".encode(),
                 b"X-CSTP-Lease-Duration: 1209600",
                 b"X-CSTP-Session-Timeout: none",
                 b"X-CSTP-Session-Timeout-Alert-Interval: 60",
@@ -227,19 +239,19 @@ class CiscoPlugin(VPNPlugin):
                 b"X-CSTP-Idle-Timeout: 1800",
                 b"X-CSTP-DNS: 8.8.8.8",
                 b"X-CSTP-Disconnected-Timeout: 1800",
-                b"X-CSTP-Split-Include: 192.168.59.0/255.255.255.0",
-                b"X-CSTP-Keep: false",
-                b"X-CSTP-Tunnel-All-DNS: false",
-                b"X-CSTP-DPD: 30",
-                b"X-CSTP-Keepalive: 20",
+                #b"X-CSTP-Split-Include: 10.10.0.0/255.255.255.0",
+                b"X-CSTP-Keep: true",
+                b"X-CSTP-Tunnel-All-DNS: true",
+                b"X-CSTP-DPD: 0",
+                b"X-CSTP-Keepalive: 0",
                 b"X-CSTP-MSIE-Proxy-Lockdown: false",
                 b"X-CSTP-Smartcard-Removal-Disconnect: true",
-                b"X-DTLS-Session-ID: 456F8991F6A915202E1FF2BCE7DC22F3C6791C806311F7CC93E551E97DC1222D",
+                f"X-DTLS-Session-ID: {session_id}".encode(),
                 b"X-DTLS-Port: 80",
-                b"X-DTLS-Keepalive: 20",
-                b"X-DTLS-DPD: 30",
-                b"X-CSTP-MTU: 1367",
-                b"X-DTLS-MTU: 1390",
+                b"X-DTLS-Keepalive: 0",
+                b"X-DTLS-DPD: 0",
+                b"X-CSTP-MTU: 1400",
+                b"X-DTLS-MTU: 1400",
                 b"X-DTLS12-CipherSuite: ECDHE-RSA-AES256-GCM-SHA384",
                 b"X-CSTP-Routing-Filtering-Ignore: false",
                 b"X-CSTP-Quarantine: false",
@@ -252,6 +264,9 @@ class CiscoPlugin(VPNPlugin):
             handler.wfile.write(b"\r\n".join(headers))
             handler.wfile.flush()
 
+            # Create CTSP parser
+            parser = CTSP(handler.connection, packet_handler=self.packet_handler, connection_id=connection_id)
+
             # Just keep reading from the client forever
             while True:
                 try:
@@ -260,9 +275,8 @@ class CiscoPlugin(VPNPlugin):
                         self.logger.info('Connection closed by client')
                         break
 
-                    # parse the packet                    
-                    parser = CTSP(data, handler.connection, packet_handler=self.packet_handler)
-                    parser.parse()
+                    # Parse the packet data
+                    parser.parse(data)
 
                 except Exception as e:
                     self.logger.error(f"Connection error: {e}")
@@ -272,7 +286,11 @@ class CiscoPlugin(VPNPlugin):
             self.logger.error(f"CONNECT error: {e}")
         finally:
             self.logger.info("Closing CONNECT tunnel")
+            self.packet_handler.destroy_session(connection_id)
             handler.connection.close()
+
+    def _wrap_packet(self, packet_data, client):
+        return CTSP.create_packet(CTSP.PacketType.DATA, packet_data)
 
     def can_handle_data(self, data, client_socket, client_ip):
         return len(data) >= 4 and CTSP.Constants.MAGIC_NUMBER == int.from_bytes(data[:4], byteorder='big')
@@ -285,9 +303,12 @@ class CiscoPlugin(VPNPlugin):
 
     def handle_data(self, data, client_socket, client_ip):
         try:
-            parser = CTSP(data, client_socket, packet_handler=self.packet_handler)
-            parser.parse()
-            return True
+            connection_id, _ = self.packet_handler.create_session(client_socket, self._wrap_packet)
+            parser = CTSP(client_socket, packet_handler=self.packet_handler, connection_id=connection_id)
+            parser.parse(data)
         except Exception as e:
             self.logger.error(f"Error handling Cisco data: {e}")
-            return False
+        finally:
+            self.packet_handler.destroy_session(connection_id)
+            client_socket.close()
+        return True

@@ -4,7 +4,6 @@ import logging
 import argparse
 import shutil
 import os
-import sys
 import uuid
 import warnings
 import subprocess
@@ -21,6 +20,17 @@ if os.name == 'nt':
 ACTION_TYPE_JSCRIPT = 6
 ACTION_TYPE_CMD = 34
 ACTION_TYPE_SHELL = 50
+
+# https://learn.microsoft.com/en-us/windows/win32/msi/custom-action-return-processing-options
+ACTION_TYPE_CONTINUE = 0x40         # Don't fail the installation if the command fails
+ACTION_TYPE_ASYNC = 0x80            # Don't wait for the command to complete - only relevant for EXE commands
+
+# https://learn.microsoft.com/en-us/windows/win32/msi/custom-action-in-script-execution-options
+ACTION_TYPE_COMMIT = 0x200          # Only run once the files have been written to disk - useful for drop & exec
+ACTION_TYPE_IN_SCRIPT = 0x400       # Schedule this as part of the installation process
+ACTION_TYPE_NO_IMPERSONATE = 0x800  # Don't drop privs
+
+ACTION_SEQUENCE_POSITION = 4999     # Fire the command after the files are written to disk by the installation process
 
 def random_name(length=12):
     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
@@ -52,28 +62,16 @@ class MSIPatcherWindows(MSIPatcher):
         db.Close()
         return version
 
-    def increment_msi_version(self, msi_path):
+    def set_msi_version(self, msi_path, new_version, change_product_code=True):
         db = msilib.OpenDatabase(msi_path, msilib.MSIDBOPEN_DIRECT)
         view = db.OpenView("SELECT `Value` FROM `Property` WHERE `Property` = 'ProductVersion'")
-        view.Execute(None)   
+        view.Execute(None)
         record = view.Fetch()
 
         current_version = None
-        new_version = None
 
         if record:
             current_version = record.GetString(1)
-            version = current_version.split('-')[0]
-            major, minor, patch = map(int, version.split('.'))
-            patch += 1
-            if patch == 100:
-                minor += 1
-                patch = 0
-            if minor == 100:
-                major += 1
-                minor = 0
-            new_version = f"{major}.{minor}.{patch}"
-
             update_view = db.OpenView("UPDATE `Property` SET `Value` = ? WHERE `Property` = 'ProductVersion'")
             update_record = msilib.CreateRecord(1)
             update_record.SetString(1, new_version)
@@ -81,14 +79,15 @@ class MSIPatcherWindows(MSIPatcher):
             update_view.Close()
             db.Commit()
 
-            new_product_code = '{' + str(uuid.uuid4()).upper() + '}'
-            product_code_view = db.OpenView("UPDATE `Property` SET `Value` = ? WHERE `Property` = 'ProductCode'")
-            product_code_record = msilib.CreateRecord(1)
-            product_code_record.SetString(1, new_product_code)
-            product_code_view.Execute(product_code_record)
-            product_code_view.Close()
-            db.Commit()
-            logging.info(f"New ProductCode: {new_product_code}")
+            if change_product_code:
+                new_product_code = '{' + str(uuid.uuid4()).upper() + '}'
+                product_code_view = db.OpenView("UPDATE `Property` SET `Value` = ? WHERE `Property` = 'ProductCode'")
+                product_code_record = msilib.CreateRecord(1)
+                product_code_record.SetString(1, new_product_code)
+                product_code_view.Execute(product_code_record)
+                product_code_view.Close()
+                db.Commit()
+                logging.info(f"New ProductCode: {new_product_code}")
 
             if current_version and new_version:
                 logging.info(f"MSI version updated from {current_version} to {new_version}")
@@ -97,6 +96,15 @@ class MSIPatcherWindows(MSIPatcher):
 
         view.Close()
         db.Close()
+
+    def increment_msi_version(self, msi_path, change_product_code=True):
+        current_version = self.get_msi_version(msi_path)
+        if not current_version:
+            logging.error("ProductVersion property not found in MSI")
+            return False
+
+        new_version = self.get_higher_version(current_version)
+        self.set_msi_version(msi_path, new_version, change_product_code)
 
     def add_custom_action(self, msi_path, name, type, source, target, sequence):
         db = msilib.OpenDatabase(msi_path, msilib.MSIDBOPEN_DIRECT)
@@ -132,7 +140,7 @@ class MSIPatcherWindows(MSIPatcher):
         rec = msilib.CreateRecord(3)
         rec.SetString(1, name)          # Action
         rec.SetString(2, "")            # Condition (probably want to use "NOT Installed")
-        rec.SetInteger(3, 1)            # Sequence
+        rec.SetInteger(3, ACTION_SEQUENCE_POSITION)            # Sequence
         seq.Execute(rec)
         seq.Close()
         db.Commit()
@@ -287,14 +295,22 @@ class MSIPatcherLinux(MSIPatcher):
                         return row[1]
         return None
 
-    def increment_msi_version(self, msi_path):
+    def increment_msi_version(self, msi_path, change_product_code=True):
+        current_version = self.get_msi_version(msi_path)
+        if not current_version:
+            logging.error("ProductVersion property not found in MSI")
+            return False
+
+        new_version = self.get_higher_version(current_version)
+        self.set_msi_version(msi_path, new_version, change_product_code)
+
+    def set_msi_version(self, msi_path, new_version, change_product_code=True):
         with tempfile.TemporaryDirectory() as temp_dir:
             subprocess.run(['msidump', '-d', temp_dir, msi_path], check=True)
 
             property_file = os.path.join(temp_dir, 'Property.idt')
             updated_property_rows = []
             current_version = None
-            new_version = None
             new_product_code = None
 
             with open(property_file, 'r') as f:
@@ -302,18 +318,8 @@ class MSIPatcherLinux(MSIPatcher):
                 for row in reader:
                     if row[0] == 'ProductVersion':
                         current_version = row[1]
-                        version = current_version.split('-')[0]
-                        major, minor, patch = map(int, version.split('.'))
-                        patch += 1
-                        if patch == 100:
-                            minor += 1
-                            patch = 0
-                        if minor == 100:
-                            major += 1
-                            minor = 0
-                        new_version = f"{major}.{minor}.{patch}"
                         row[1] = new_version
-                    elif row[0] == 'ProductCode':
+                    elif row[0] == 'ProductCode' and change_product_code:
                         new_product_code = '{' + str(uuid.uuid4()).upper() + '}'
                         row[1] = new_product_code
                     updated_property_rows.append(row)
@@ -329,6 +335,19 @@ class MSIPatcherLinux(MSIPatcher):
         if new_product_code:
             logging.info(f"New ProductCode: {new_product_code}")
 
+    def add_custom_property(self, msi_path, name, value):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            subprocess.run(['msidump', '-d', temp_dir, msi_path], check=True)
+
+            property_file = os.path.join(temp_dir, 'Property.idt')
+            with open(property_file, 'a', newline='') as f:
+                writer = csv.writer(f, delimiter='\t')
+                writer.writerow([name, value])
+
+            subprocess.run(['msibuild', msi_path, '-i', os.path.join(temp_dir, 'Property.idt')], check=True)
+
+        return True
+
     def add_custom_action(self, msi_path, name, type, source, target, sequence):
         with tempfile.TemporaryDirectory() as temp_dir:
             subprocess.run(['msidump', '-d', temp_dir, msi_path], check=True)
@@ -343,14 +362,16 @@ class MSIPatcherLinux(MSIPatcher):
             # Add CustomAction
             custom_action_file = os.path.join(temp_dir, 'CustomAction.idt')
             with open(custom_action_file, 'a', newline='') as f:
-                writer = csv.writer(f, delimiter='\t')
+                # Configure the CSV writer not to wrap fields in quotes even if they contain special chars,
+                # and to only try to escape \t and ` (which shouldn't occur in most Windows commands)
+                writer = csv.writer(f, delimiter='\t', quoting=csv.QUOTE_NONE, quotechar='`')
                 writer.writerow([name, str(type), source_key, target])
 
             # Add to sequence
             sequence_file = os.path.join(temp_dir, f'{sequence}.idt')
             with open(sequence_file, 'a', newline='') as f:
                 writer = csv.writer(f, delimiter='\t')
-                writer.writerow([name, '', '1'])
+                writer.writerow([name, '', str(ACTION_SEQUENCE_POSITION)])
 
             # Add the property file to the MSI
             subprocess.run(['msibuild', msi_path, 
@@ -491,7 +512,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     sequence = "InstallExecuteSequence"
-    action_type = ACTION_TYPE_SHELL
+    action_type = (ACTION_TYPE_SHELL | ACTION_TYPE_CONTINUE | ACTION_TYPE_ASYNC | ACTION_TYPE_COMMIT |
+                   ACTION_TYPE_IN_SCRIPT | ACTION_TYPE_NO_IMPERSONATE)
     source = "C:\\windows\\system32\\cmd.exe"
 
     patcher = get_msi_patcher()

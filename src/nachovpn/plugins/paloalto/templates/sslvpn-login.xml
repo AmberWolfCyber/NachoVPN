@@ -2,7 +2,7 @@
 <jnlp>
 <application-desc>
 <argument></argument>
-<argument>f701c63e16880dc2aad5505e4ea17d19</argument>
+<argument>{{ auth_cookie }}</argument>
 <argument>532e8287b925b74d6925c6ada18f2d27da38665d</argument>
 <argument>woot gw-N</argument>
 <argument>bob</argument>
@@ -16,7 +16,7 @@
 <argument>tunnel</argument>
 <argument>-1</argument>
 <argument>4100</argument>
-<argument>192.168.99.122</argument>
+<argument>{{ client_ip }}</argument>
 <argument>empty</argument>
 <argument>empty</argument>
 <argument></argument>

@@ -11,5 +11,5 @@
 <password-label>Password</password-label>
 <panos-version>1</panos-version>
 <saml-default-browser>yes</saml-default-browser>
-<auth-api>no</auth-api><region>192.168.0.0-192.168.255.255</region>
+<auth-api>no</auth-api><region>10.10.0.0-10.10.255.255</region>
 </prelogin-response>

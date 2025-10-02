@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 import os
-import sys
 import struct
 import ipaddress
-import logging
 
 ROUTE_SPLIT_INCLUDE = 0x07000010
 ROUTE_SPLIT_EXCLUDE = 0xf1000010
@@ -66,11 +64,12 @@ class ESPConfigGenerator:
         return config
 
 class VPNConfigGenerator:
-    def __init__(self, logon_script="C:\\Windows\\System32\\calc.exe", logon_script_macos="",dns_suffix="nachovpn.local", routes=EXAMPLE_ROUTES):
+    def __init__(self, logon_script="C:\\Windows\\System32\\calc.exe", logon_script_macos="", dns_suffix="nachovpn.local", routes=EXAMPLE_ROUTES, client_ip=None):
         self.logon_script = logon_script
         self.logon_script_macos = logon_script_macos
         self.dns_suffix = dns_suffix
         self.routes = routes
+        self.client_ip = client_ip
 
     @staticmethod
     def hexdump(data, length=16):
@@ -202,18 +201,18 @@ class VPNConfigGenerator:
         final_attrs += self.write_be16(0)            # placeholder: length of the rest of the config
         final_attrs += self.write_be32(0x03000000)   # fixed value
         final_attrs += self.create_attribute(CFG_DISCONNECT_WHEN_ROUTES_CHANGED, b'\x00')
-        final_attrs += self.create_attribute(CFG_TUNNEL_ROUTES_TAKE_PRECEDENCE, b'\x00')
+        final_attrs += self.create_attribute(CFG_TUNNEL_ROUTES_TAKE_PRECEDENCE, b'\x01')
         final_attrs += self.create_attribute(CFG_TUNNEL_ROUTES_WITH_SUBNET_ACCESS, b'\x00')
-        final_attrs += self.create_attribute(CFG_ENFORCE_IPV4, b'\x00')
+        final_attrs += self.create_attribute(CFG_ENFORCE_IPV4, b'\x01')
         final_attrs += self.create_attribute(CFG_ENFORCE_IPV6, b'\x00')
-        final_attrs += self.create_attribute(CFG_MTU, self.write_be32(1400))
+        final_attrs += self.create_attribute(CFG_MTU, self.write_be32(1400))  # Client interface MTU
         final_attrs += self.create_attribute(CFG_DNS_SERVER, b'\x01\x01\x01\x01')
         final_attrs += self.create_attribute(CFG_DNS_SUFFIX, self.dns_suffix.encode() + b'\x00')
         final_attrs += self.create_attribute(CFG_UNKNOWN_4007, self.write_be32(1))
         final_attrs += self.create_attribute(CFG_WINS_SERVER, b'\x01\x01\x01\x01')
         final_attrs += self.create_attribute(CFG_UNKNOWN_4019, b'\x01')
         final_attrs += self.create_attribute(CFG_ESP_ONLY, b'\x00')
-        final_attrs += self.create_attribute(CFG_ESP_ALLOW_6IN4, b'\x01')
+        final_attrs += self.create_attribute(CFG_ESP_ALLOW_6IN4, b'\x00')
         final_attrs += self.create_attribute(CFG_UNKNOWN_400F, b'\x00\x00')
         final_attrs += self.create_attribute(CFG_ESP_ENC_ALG, self.write_be16(ENC_AES_256_CBC))
         final_attrs += self.create_attribute(CFG_ESP_HMAC_ALG, self.write_be16(HMAC_SHA256))
@@ -222,11 +221,17 @@ class VPNConfigGenerator:
         final_attrs += self.create_attribute(CFG_ESP_REPLAY_PROTECTION, self.write_be32(1))
         final_attrs += self.create_attribute(CFG_TOS_COPY, self.write_be32(0))
         final_attrs += self.create_attribute(CFG_ESP_PORT, self.write_be16(0x1194))
-        final_attrs += self.create_attribute(CFG_ESP_TO_SSL_FALLBACK_SECS, self.write_be32(15))
+        final_attrs += self.create_attribute(CFG_ESP_TO_SSL_FALLBACK_SECS, self.write_be32(1))
         final_attrs += self.create_attribute(CFG_UNKNOWN_4018, self.write_be32(60))
-        final_attrs += self.create_attribute(CFG_INTERNAL_LEGACY_IP, self.write_be32(self.ipv4_to_int("10.10.1.1")))
+
+        # Use allocated IP if provided, otherwise use default
+        if self.client_ip:
+            final_attrs += self.create_attribute(CFG_INTERNAL_LEGACY_IP, self.write_be32(self.ipv4_to_int(self.client_ip)))
+        else:
+            final_attrs += self.create_attribute(CFG_INTERNAL_LEGACY_IP, self.write_be32(self.ipv4_to_int("10.10.1.1")))
+
         final_attrs += self.create_attribute(CFG_NETMASK, self.write_be32(self.ipv4_to_int("255.255.255.255")))
-        final_attrs += self.create_attribute(CFG_INTERNAL_GATEWAY_IP, self.write_be32(self.ipv4_to_int("10.200.200.200")))
+        final_attrs += self.create_attribute(CFG_INTERNAL_GATEWAY_IP, self.write_be32(self.ipv4_to_int("10.10.0.1")))
         final_attrs += self.create_attribute(CFG_LOGON_SCRIPT, self.logon_script.encode() + b'\x00')
         final_attrs += self.create_attribute(0x400d, b'\x00')
         final_attrs += self.create_attribute(0x400e, b'\x00')

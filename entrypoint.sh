@@ -1,14 +1,14 @@
 #!/bin/bash
 
-if [[ -z "${SERVER_FQDN}" ]]; then
-  echo "Error: SERVER_FQDN is not set or is empty"
-  exit 1
-fi
+#if [[ -z "${SERVER_FQDN}" ]]; then
+#  echo "Error: SERVER_FQDN is not set or is empty"
+#  exit 1
+#fi
 
-if [[ -z "${EXTERNAL_IP}" ]]; then
-  echo "Error: EXTERNAL_IP is not set or is empty"
-  exit 1
-fi
+#if [[ -z "${EXTERNAL_IP}" ]]; then
+#  echo "Error: EXTERNAL_IP is not set or is empty"
+#  exit 1
+#fi
 
 CERT_PATH="/app/certs/server-dns.crt"
 KEY_PATH="/app/certs/server-dns.key"

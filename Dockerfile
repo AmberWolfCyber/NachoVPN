@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM ubuntu:jammy
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -12,9 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     msitools \
     mingw-w64 \
     gcc-mingw-w64 \
+    python3 \
+    python3-pip \
+    python-is-python3 \
+    python3-nftables \
+    nftables \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 COPY setup.py .
 COPY MANIFEST.in .

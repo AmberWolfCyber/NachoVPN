@@ -154,7 +154,7 @@
     <preserve-tunnel-upon-user-logoff-timeout>0</preserve-tunnel-upon-user-logoff-timeout>
     <ipsec-failover-ssl>1</ipsec-failover-ssl>
     <display-tunnel-fallback-notification>yes</display-tunnel-fallback-notification>
-    <ssl-only-selection>0</ssl-only-selection>
+    <ssl-only-selection>1</ssl-only-selection>
     <tunnel-mtu>1400</tunnel-mtu>
     <max-internal-gateway-connection-attempts>0</max-internal-gateway-connection-attempts>
     <portal-timeout>60</portal-timeout>

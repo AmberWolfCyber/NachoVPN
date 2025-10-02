@@ -7,8 +7,6 @@
 <p align="center">
     <a href="LICENSE" alt="License: MIT">
         <img src="https://img.shields.io/badge/License-MIT-yellow.svg" /></a>
-    <a href="https://github.com/AmberWolfCyber/NachoVPN/actions/workflows" alt="Docker Build">
-        <img src="https://github.com/AmberWolfCyber/NachoVPN/actions/workflows/build-docker.yml/badge.svg" /></a>
 </p>
 
 NachoVPN is a Proof of Concept that demonstrates exploitation of SSL-VPN clients, using a rogue VPN server.
@@ -25,20 +23,40 @@ For further details, see our [blog post](https://blog.amberwolf.com/blog/2024/no
 * Docker (optional)
 * osslsigncode (Linux only)
 * msitools (Linux only)
-* git (optional)
+* python3-netfilter (Linux only)
+* git
+
+### Linux Setup
+
+NachoVPN is built and tested on Ubuntu 22.04.
+
+* Install `python3-nftables` and `nftables`
+* Optionally use `setcap` to avoid `sudo` requirement:
+
+  ```bash
+  sudo setcap 'cap_net_raw,cap_net_bind_service,cap_net_admin=eip' /usr/bin/python3.10
+  ```
+
+* Enable IP forwarding:
+
+  ```bash
+  sudo sysctl -w net.ipv4.ip_forward=1
+  ```
 
 ### Installing from source
 
 NachoVPN can be installed from GitHub using pip. Note that this requires git to be installed.
 
-First, create a virtual environment. On Linux, this can be done with:
+First, create a virtual environment.
+
+On Linux, ensure that the virtual env has access to the system `site-packages`, so that `nftables` works:
 
 ```bash
-python3 -m venv env
+python3 -m venv env --system-site-packages
 source env/bin/activate
 ```
 
-On Windows, use:
+On Windows, nftables (and thus packet forwarding) is disabled, so use:
 
 ```bash
 python -m venv env
@@ -54,7 +72,7 @@ pip install git+https://github.com/AmberWolfCyber/NachoVPN.git
 If you prefer to use Docker, then you can pull the container from the GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/amberwolfcyber/nachovpn:release
+docker pull ghcr.io/AmberWolfCyber/nachovpn:release
 ```
 
 ## Building for distribution
@@ -131,8 +149,9 @@ NachoVPN supports the following plugins and capabilities:
 | -------- | ----------- | -------- | -------- | -------- | -------- | -------- | -------- | ---- |
 | Cisco | Cisco AnyConnect | N/A | ✅ | ✅ | ❌ | ❌ | ✅ | [Windows](https://vimeo.com/1024773762) / [macOS](https://vimeo.com/1024773668) |
 | SonicWall | SonicWall NetExtender | [CVE-2024-29014](https://blog.amberwolf.com/blog/2024/november/sonicwall-netextender-for-windows---rce-as-system-via-epc-client-update-cve-2024-29014/) | ✅ | ❌ | ✅ | ✅ | ❌ | [Windows](https://vimeo.com/1024774407) |
-| PaloAlto | Palo Alto GlobalProtect | [CVE-2024-5921](https://blog.amberwolf.com/blog/2024/november/palo-alto-globalprotect---code-execution-and-privilege-escalation-via-malicious-vpn-server-cve-2024-5921/) (partial fix) | ✅ | ✅ | ✅ | ❌ | ✅ | [Windows](https://vimeo.com/1024774239) / [macOS](https://vimeo.com/1024773987) / [iOS](https://vimeo.com/1024773956) |
-| PulseSecure | Ivanti Connect Secure | N/A | ✅ | ✅ | ❌ | ✅ (Windows only) | ✅ | [Windows](https://vimeo.com/1024773914) |
+| PaloAlto | Palo Alto GlobalProtect | [CVE-2024-5921](https://blog.amberwolf.com/blog/2024/november/palo-alto-globalprotect---code-execution-and-privilege-escalation-via-malicious-vpn-server-cve-2024-5921/) [(partial fix)](https://blog.amberwolf.com/blog/2025/august/nachovpn-update---palo-alto-globalprotect/) | ✅ | ✅ | ✅ | ❌ | ✅ | [Windows](https://vimeo.com/1024774239) / [macOS](https://vimeo.com/1024773987) / [iOS](https://vimeo.com/1024773956) |
+| PulseSecure | Ivanti Connect Secure | [CVE-2020-8241 (bypassed)](https://blog.amberwolf.com/blog/2025/july/nachovpn-update---ivanti-connect-secure/) | ✅ | ✅ | ✅ | ✅ (Windows only - disabled by default in [22.8R1](https://help.ivanti.com/ps/help/en_US/ISAC/22.X/rn-22.X/noteworthy-information.htm)) | ✅ | [Windows](https://vimeo.com/1024773914) |
+| Netskope | Netskope | [CVE-2025-0309](https://blog.amberwolf.com/blog/2025/august/advisory---netskope-client-for-windows---local-privilege-escalation-via-rogue-server/) | ✅ | ❌ | ✅ | ❌ | ❌ | [Windows](https://vimeo.com/1114191607) |
 
 #### URI handlers
 
@@ -145,6 +164,7 @@ NachoVPN supports the following plugins and capabilities:
 * In order to simulate a valid codesigning certificate for the SonicWall plugin, NachoVPN will sign the `NACAgent.exe` payload with a self-signed certificate. For testing purposes, you can download and install this CA certificate from `/sonicwall/ca.crt` before triggering the exploit. For production use-cases, you will need to obtain a valid codesigning certificate from a public CA, sign your `NACAgent.exe` payload, and place it in the `payloads` directory (or volume mount it into `/app/payloads`, if using docker).
 * For convenience, a default `NACAgent.exe` payload is generated for the SonicWall plugin, and written to the `payloads` directory. This simply spawns a new `cmd.exe` process on the current user's desktop, running as `SYSTEM`.
 * The Palo Alto GlobalProtect plugin requires that the MSI installers and `msi_version.txt` file are present in the `downloads` directory. Either add these manually, or run the `msi_downloader.py` script to download them.
+* To perform the Palo Alto GlobalProtect downgrade attack, ensure that the `GlobalProtect.msi.old` and `GlobalProtect64.msi.old` are present in the `downloads` folder. These files should contain the *unmodified* MSI installers for a version *prior* to 6.2.6 (e.g. 6.2.5).
 
 #### Disabling a plugin
 
@@ -169,6 +189,11 @@ Global environment variables:
 | `USE_DYNAMIC_SERVER_THUMBPRINT` | Whether to calculate the server certificate thumbprint dynamically from the server (useful if behind a proxy). | `false` |
 | `SERVER_SHA1_THUMBPRINT` | Allows overriding the calculated SHA1 thumbprint for the server certificate. | |
 | `SERVER_MD5_THUMBPRINT` | Allows overriding the calculated MD5 thumbprint for the server certificate. | |
+| `SMB_ENABLED` | Enables the SMB share, available via the tunnel at `\\10.10.0.1\<SMB_SHARE_NAME>` | `false` |
+| `SMB_SHARE_NAME` | The name to use for the SMB share | `SHARE` |
+| `SMB_SHARE_PATH` | The path to the directory to use for the SMB share | `smb` |
+| `TUNNEL_PRIVATE` | When set to `true`, enables tunneling but disables internet forwarding for VPN clients. Clients can only access the SMB share. | `false` |
+| `TUNNEL_FULL` | When set to `true`, enables full tunneling and allows VPN clients to access the internet. Also implies `TUNNEL_PRIVATE=true`. | `false` |
 
 Plugin specific environment variables:
 
@@ -181,6 +206,7 @@ Plugin specific environment variables:
 | `PULSE_USERNAME` | The username to be pre-filled in the Pulse Secure logon dialog. | |
 | `PULSE_SAVE_CONNECTION` | Whether to save the Pulse Secure connection in the user's client. | `false` |
 | `PULSE_ANONYMOUS_AUTH` | Whether to use anonymous authentication for Pulse Secure connections. If set to `true`, the user will not be prompted for a username or password. | `false` |
+| `PULSE_HOST_CHECKER_RULES_FILE` | A JSON file containing a list of registry-based host-checker rules for ICS. See example in `src/nachovpn/plugins/pulse/test/example_rules.json` | |
 | `PALO_ALTO_MSI_ADD_FILE` | The path to a file to be added to the Palo Alto installer MSI. | |
 | `PALO_ALTO_MSI_COMMAND` | The command to be executed by the Palo Alto installer MSI. | `net user pwnd Passw0rd123! /add && net localgroup administrators pwnd /add` |
 | `PALO_ALTO_FORCE_PATCH` | Whether to force the patching of the MSI installer if it already exists in the payloads directory. | `false` |

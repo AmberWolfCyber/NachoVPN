@@ -3,6 +3,8 @@ from nachovpn.core.plugin_manager import PluginManager
 from nachovpn.core.cert_manager import CertManager
 from nachovpn.core.db_manager import DBManager
 from nachovpn.plugins import VPNPlugin
+from nachovpn.core.packet_handler import PacketHandler
+from nachovpn.core.smb_manager import SMBManager
 
 import nachovpn.plugins
 import logging
@@ -10,8 +12,9 @@ import inspect
 import socket
 import socketserver
 import os
-import uuid
 import sys
+import threading
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +40,9 @@ class VPNServer:
         # Initialize database
         self.db_manager = DBManager()
 
+        # Start SMB server
+        self.smb_manager = SMBManager()
+
         # Setup plugin manager with cert hash
         self.plugin_manager = PluginManager()
 
@@ -45,9 +51,14 @@ class VPNServer:
             'write_pcap': os.getenv("WRITE_PCAP", False),
             'cert_manager': self.cert_manager,
             'external_ip': os.getenv('EXTERNAL_IP', socket.gethostbyname(socket.gethostname())),
-            'dns_name': os.getenv('SERVER_FQDN', socket.gethostname()),
+            'dns_name': os.getenv('SERVER_FQDN') or os.getenv('WEBSITE_HOSTNAME', socket.gethostname()),
             'db_manager': self.db_manager,
         }
+
+        # Create PacketHandler
+        self.packet_handler = PacketHandler(write_pcap=plugin_kwargs['write_pcap'])
+        plugin_kwargs['packet_handler'] = self.packet_handler
+        self.plugin_manager.packet_handler = self.packet_handler
 
         # Register plugins
         for name, plugin in inspect.getmembers(nachovpn.plugins, inspect.isclass):
@@ -57,15 +68,41 @@ class VPNServer:
         # Allow reuse of the address
         socketserver.ThreadingTCPServer.allow_reuse_address = True
 
+        # Set packet handler
+        self._packet_handler_thread = None
+        self._packet_handler_loop = None
+
+    def _start_packet_handler(self):
+        def run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._packet_handler_loop = loop
+            loop.run_until_complete(self.packet_handler.start())
+            loop.run_forever()
+
+        self._packet_handler_thread = threading.Thread(target=run, daemon=True)
+        self._packet_handler_thread.start()
+
+    def _stop_packet_handler(self):
+        if self._packet_handler_loop:
+            self._packet_handler_loop.call_soon_threadsafe(self._packet_handler_loop.stop)
+        if self._packet_handler_thread:
+            self._packet_handler_thread.join(timeout=5)
+
     def run(self):
-        with ThreadedVPNServer(
-            (self.host, self.port), 
-            VPNStreamRequestHandler,
-            self.cert_manager,
-            self.plugin_manager
-        ) as server:
-            logging.info(f"Server listening on {self.host}:{self.port}")
-            server.serve_forever()
+        # Start PacketHandler
+        self._start_packet_handler()
+        try:
+            with ThreadedVPNServer(
+                (self.host, self.port),
+                VPNStreamRequestHandler,
+                self.cert_manager,
+                self.plugin_manager
+            ) as server:
+                logging.info(f"Server listening on {self.host}:{self.port}")
+                server.serve_forever()
+        finally:
+            self._stop_packet_handler()
 
 def main():
     log_level = logging.INFO
