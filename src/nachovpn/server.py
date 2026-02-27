@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import asyncio
+import argparse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,16 +23,18 @@ logging.basicConfig(
 )
 
 class ThreadedVPNServer(socketserver.ThreadingTCPServer):
-    def __init__(self, server_address, RequestHandlerClass, cert_manager, plugin_manager):
+    def __init__(self, server_address, RequestHandlerClass, cert_manager, plugin_manager, use_tls=True):
         self.cert_manager = cert_manager
         self.plugin_manager = plugin_manager
         super().__init__(server_address, RequestHandlerClass)
-        self.socket = cert_manager.ssl_context.wrap_socket(self.socket, server_side=True)
+        if use_tls:
+            self.socket = cert_manager.ssl_context.wrap_socket(self.socket, server_side=True)
 
 class VPNServer:
-    def __init__(self, host='0.0.0.0', port=443, cert_dir=os.path.join(os.getcwd(), 'certs')):
+    def __init__(self, host='0.0.0.0', port=443, tls=True, cert_dir=os.path.join(os.getcwd(), 'certs')):
         self.host = host
         self.port = port
+        self.tls = tls
 
         # Setup certificates
         self.cert_manager = CertManager(cert_dir)
@@ -97,7 +100,8 @@ class VPNServer:
                 (self.host, self.port),
                 VPNStreamRequestHandler,
                 self.cert_manager,
-                self.plugin_manager
+                self.plugin_manager,
+                self.tls
             ) as server:
                 logging.info(f"Server listening on {self.host}:{self.port}")
                 server.serve_forever()
@@ -105,16 +109,26 @@ class VPNServer:
             self._stop_packet_handler()
 
 def main():
-    log_level = logging.INFO
+    parser = argparse.ArgumentParser(description='NachoVPN Server')
+    parser.add_argument('--port', type=int, default=443, help='Port to listen on (default: 443)')
+    parser.add_argument('--no-tls', dest='tls', action='store_false', help='Disable TLS encryption (default: enabled)')
+    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to (default: 0.0.0.0)')
+    parser.add_argument('--cert-dir', default=os.path.join(os.getcwd(), 'certs'), help='Certificate directory (default: ./certs)')
+    parser.add_argument('-d', '--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('-q', '--quiet', action='store_true', help='Enable quiet logging (warnings only)')
 
-    if '-d' in sys.argv or '--debug' in sys.argv:
+    args = parser.parse_args()
+
+    # Set log level
+    log_level = logging.INFO
+    if args.debug:
         log_level = logging.DEBUG
-    elif '-q' in sys.argv or '--quiet' in sys.argv:
+    elif args.quiet:
         log_level = logging.WARNING
 
     logging.getLogger().setLevel(log_level)
 
-    server = VPNServer()
+    server = VPNServer(host=args.host, port=args.port, tls=args.tls, cert_dir=args.cert_dir)
     try:
         server.run()
     except KeyboardInterrupt:

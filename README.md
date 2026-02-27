@@ -152,11 +152,13 @@ NachoVPN supports the following plugins and capabilities:
 | PaloAlto | Palo Alto GlobalProtect | [CVE-2024-5921](https://blog.amberwolf.com/blog/2024/november/palo-alto-globalprotect---code-execution-and-privilege-escalation-via-malicious-vpn-server-cve-2024-5921/) [(partial fix)](https://blog.amberwolf.com/blog/2025/august/nachovpn-update---palo-alto-globalprotect/) | ✅ | ✅ | ✅ | ❌ | ✅ | [Windows](https://vimeo.com/1024774239) / [macOS](https://vimeo.com/1024773987) / [iOS](https://vimeo.com/1024773956) |
 | PulseSecure | Ivanti Connect Secure | [CVE-2020-8241 (bypassed)](https://blog.amberwolf.com/blog/2025/july/nachovpn-update---ivanti-connect-secure/) | ✅ | ✅ | ✅ | ✅ (Windows only - disabled by default in [22.8R1](https://help.ivanti.com/ps/help/en_US/ISAC/22.X/rn-22.X/noteworthy-information.htm)) | ✅ | [Windows](https://vimeo.com/1024773914) |
 | Netskope | Netskope | [CVE-2025-0309](https://blog.amberwolf.com/blog/2025/august/advisory---netskope-client-for-windows---local-privilege-escalation-via-rogue-server/) | ✅ | ❌ | ✅ | ❌ | ❌ | [Windows](https://vimeo.com/1114191607) |
+| Delinea | Protocol Handler | [CVE-2026-????](https://blog.amberwolf.com/blog/2026/february/delinea-protocol-handler---return-of-the-msi/) | ✅ | ✅ | ❌ | ✅ | ❌ | [Windows](https://vimeo.com/1168821295) |
 
 #### URI handlers
 
 * The Ivanti Connect Secure (Pulse Secure) URI handler can be triggered by visiting the `/pulse` URL on the NachoVPN server.
 * The SonicWall NetExtender URI handler can be triggered by visiting the `/sonicwall` URL on the NachoVPN server. This requires that the SonicWall Connect Agent is installed on the client machine.
+* The Delinea URI handler can be triggered by visiting the `/delinea` URL on the NachoVPN server.
 
 #### Operating Notes
 

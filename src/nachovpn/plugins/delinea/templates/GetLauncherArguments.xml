@@ -1,0 +1,7 @@
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <GetLauncherArgumentsResponse xmlns="urn:thesecretserver.com">
+      <GetLauncherArgumentsResult>{{ launcher_args }}</GetLauncherArgumentsResult>
+    </GetLauncherArgumentsResponse>
+  </soap:Body>
+</soap:Envelope>

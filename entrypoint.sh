@@ -15,6 +15,8 @@ KEY_PATH="/app/certs/server-dns.key"
 
 if [[ -n "${SKIP_CERTBOT}" ]]; then
   echo "SKIP_CERTBOT is set. Skipping Certbot execution."
+elif [[ -n "${WEBSITE_HOSTNAME}" ]]; then
+  echo "WEBSITE_HOSTNAME is set. Skipping Certbot execution."
 elif [[ -f "$CERT_PATH" && -f "$KEY_PATH" ]]; then
   echo "Certificate and key already exist. Skipping Certbot execution."
 else
@@ -44,5 +46,20 @@ else
   fi
 fi
 
-echo "Starting nachovpn server"
-exec python -m nachovpn.server
+# Build CLI arguments
+CLI_ARGS=""
+
+# Check for SERVER_PORT or WEBSITE_HOSTNAME (implies port 80)
+if [[ -n "${SERVER_PORT}" ]]; then
+  CLI_ARGS="$CLI_ARGS --port $SERVER_PORT"
+elif [[ -n "${WEBSITE_HOSTNAME}" ]]; then
+  CLI_ARGS="$CLI_ARGS --port 80"
+fi
+
+# Check for DISABLE_TLS or WEBSITE_HOSTNAME (implies no TLS)
+if [[ -n "${DISABLE_TLS}" || -n "${WEBSITE_HOSTNAME}" ]]; then
+  CLI_ARGS="$CLI_ARGS --no-tls"
+fi
+
+echo "Starting nachovpn server with arguments: $CLI_ARGS"
+exec python -m nachovpn.server $CLI_ARGS

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope
+	xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<soap:Body>
+		<UpdateStatusV2Response
+			xmlns="urn:thesecretserver.com">
+			<UpdateStatusV2Result>
+				<IsBeingViewed>false</IsBeingViewed>
+				<IsTerminate>false</IsTerminate>
+				<IsWarning>false</IsWarning>
+			</UpdateStatusV2Result>
+		</UpdateStatusV2Response>
+	</soap:Body>
+</soap:Envelope>

@@ -1,0 +1,9 @@
+<html>
+    <body>
+        <script>
+            const guid = "{{ guid }}";
+            const sessionGuid = "{{ session_guid }}";
+            window.location.href = `sslauncher:///?ssurl={{ url_encoded }}&guid=${guid}&sessionGuid=${sessionGuid}&type=process&apiVersion=3&autoUpdateEnabled=True`;
+        </script>
+    </body>
+</html>

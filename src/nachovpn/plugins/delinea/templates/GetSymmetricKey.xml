@@ -1,0 +1,12 @@
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <GetSymmetricKeyResponse xmlns="urn:thesecretserver.com">
+      <GetSymmetricKeyResult>
+        <Key>{{ aes_key }}</Key>
+        <IV>{{ aes_iv }}</IV>
+        <SessionKey>{{ session_key }}</SessionKey>
+        <SessionIV>{{ session_iv }}</SessionIV>
+      </GetSymmetricKeyResult>
+    </GetSymmetricKeyResponse>
+  </soap:Body>
+</soap:Envelope>

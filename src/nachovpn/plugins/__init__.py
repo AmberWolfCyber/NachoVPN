@@ -4,6 +4,7 @@ from nachovpn.plugins.cisco.plugin import CiscoPlugin
 from nachovpn.plugins.sonicwall.plugin import SonicWallPlugin
 from nachovpn.plugins.pulse.plugin import PulseSecurePlugin
 from nachovpn.plugins.netskope.plugin import NetskopePlugin
+from nachovpn.plugins.delinea.plugin import DelineaPlugin
 from nachovpn.plugins.example.plugin import ExamplePlugin
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     'SonicWallPlugin',
     'PulseSecurePlugin',
     'NetskopePlugin',
+    'DelineaPlugin',
     'ExamplePlugin'
 ]
